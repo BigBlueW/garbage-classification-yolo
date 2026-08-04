@@ -1,5 +1,7 @@
 # AI Robotics - Garbage Classification (YOLOv11)
 
+![Demo](demo.gif)
+
 這是一個專為機器手臂夾取與分類系統設計的 YOLOv11x 垃圾辨識模組。專案包含了從底層訓練、資料標註、到視角微調 (Fine-tuning) 的完整開發流程。
 
 ## 專案工作流程 (Workflow)
