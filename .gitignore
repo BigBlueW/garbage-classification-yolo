@@ -1,0 +1,20 @@
+# Environments
+.venv/
+__pycache__/
+*.pyc
+
+# IDEs
+.vscode/
+.idea/
+
+# Datasets
+archive/
+archive.zip
+
+# Model Weights
+yolo*.pt
+last.pt
+
+# Training outputs and test results
+runs/
+test_results/
