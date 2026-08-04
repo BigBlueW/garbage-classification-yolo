@@ -1,0 +1,9 @@
+path: ./custom_dataset
+train: train/images
+val: test/images
+
+names:
+  0: plastic
+  1: metal
+  2: paper
+  3: general_waste

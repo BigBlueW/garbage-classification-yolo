@@ -13,7 +13,7 @@ ctk.set_default_color_theme("dark-blue")
 
 # Config Paths
 MODEL_PATH = "best.pt"
-TEST_IMAGES_DIR = "archive/GARBAGE CLASSIFICATION/test/images"
+TEST_IMAGES_DIR = "custom_dataset/test/images"
 
 class App(ctk.CTk):
     def __init__(self):
@@ -114,15 +114,16 @@ class App(ctk.CTk):
         try:
             self.model = YOLO(MODEL_PATH)
             
-            # Map original 6 classes to 4 target classes for the robotic system
-            self.model.model.names = {
-                0: "general_waste",
-                1: "paper",
-                2: "general_waste",
-                3: "metal",
-                4: "paper",
-                5: "plastic"
-            }
+            # Map original 6 classes to 4 target classes for the robotic system ONLY if it's the old 6-class model
+            if len(self.model.model.names) == 6:
+                self.model.model.names = {
+                    0: "general_waste",
+                    1: "paper",
+                    2: "general_waste",
+                    3: "metal",
+                    4: "paper",
+                    5: "plastic"
+                }
             
             self.model_status_label.configure(
                 text="System Ready", 
@@ -178,7 +179,7 @@ class App(ctk.CTk):
         conf_thresh = self.conf_slider.get()
         iou_thresh = self.iou_slider.get()
         
-        results = self.model(self.raw_image_bgr, conf=conf_thresh, iou=iou_thresh, verbose=False)[0]
+        results = self.model(self.raw_image_bgr, conf=conf_thresh, iou=iou_thresh, agnostic_nms=True, verbose=False)[0]
         
         annotated_img = results.plot(line_width=2, font_size=16)
         self.show_image(annotated_img)

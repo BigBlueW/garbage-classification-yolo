@@ -1,57 +1,96 @@
 # AI Robotics - Garbage Classification (YOLOv11)
 
-這是一個基於 Ultralytics YOLOv11x 訓練的垃圾分類影像辨識模組。
+這是一個專為機器手臂夾取與分類系統設計的 YOLOv11x 垃圾辨識模組。專案包含了從底層訓練、資料標註、到視角微調 (Fine-tuning) 的完整開發流程。
 
-## 專案介紹
+## 專案工作流程 (Workflow)
 
-* **原始分類 (6類)**：`BIODEGRADABLE` (廚餘), `CARDBOARD` (紙板), `GLASS` (玻璃), `METAL` (金屬), `PAPER` (紙張), `PLASTIC` (塑膠)。
-* **實戰應用合併 (4大類)**：為了符合機器人的夾爪分類邏輯，透過腳本將這 6 種類別動態合併為 4 大類：`general_waste` (一般垃圾/其他), `paper` (紙類), `metal` (金屬), `plastic` (塑膠)。
+剛接觸本專案的新手，請參考以下工作流程圖，了解各腳本之間的協作關係：
 
-## 環境與安裝 (Installation)
-
-1. **虛擬環境**
-```bash
-python3 -m venv .venv
-source .venv/bin/activate  # Linux
-# 或在 Windows 用: .venv\Scripts\activate
+```mermaid
+graph TD
+    A[Kaggle 資料集] -->|下載並解壓縮| B(train.py)
+    C[自製機器人視角圖片] -->|放入 custom_dataset/images| D(label_tool.py)
+    
+    D -->|產生 YOLO 格式標籤| E[自訂資料集與 yaml]
+    B -->|訓練| F[基礎 6 類模型]
+    
+    F -->|做為預訓練基底| G(finetune.py)
+    E -->|輸入資料| G
+    
+    G -->|微調與轉換分類層| H[專屬 4 類微調模型 best.pt]
+    H -->|部署與測試| I(test_gui.py)
+    H -->|準確率分析| J(evaluate.py)
 ```
 
-2. **安裝依賴套件**
+## 專案架構與分類邏輯
+
+本專案採用「兩階段訓練」策略，以克服開源資料集與實際機器人視角間的環境落差 (Domain Gap)：
+
+1. 基礎模型 (6大類)
+利用 Kaggle 大型資料集進行初步訓練，建立模型對垃圾紋理與反光的基礎認知。
+類別：BIODEGRADABLE(廚餘), CARDBOARD(紙板), GLASS(玻璃), METAL(金屬), PAPER(紙張), PLASTIC(塑膠)。
+
+2. 機器人專屬微調模型 (4大類)
+使用符合機器人真實視角（正上方鳥瞰、純黑桌面）的自訂資料集進行微調 (Fine-tuning)。
+最終輸出類別：plastic(塑膠), metal(金屬), paper(紙類), general_waste(一般垃圾)。
+
+## 環境與安裝
+
+1. 建立虛擬環境
+```bash
+python3 -m venv .venv
+source .venv/bin/activate  # Linux/macOS
+# Windows: .venv\Scripts\activate
+```
+
+2. 安裝依賴套件
 ```bash
 pip install -r requirements.txt
 ```
 
-## 資料準備 (Dataset & Weights)
+## 資料準備與權重
 
-1. **預訓練權重 (Model Weights)**
-   * 本專案已使用 **Git LFS (Large File Storage)** 來追蹤訓練好的模型權重檔 `best.pt` (114MB)。
-   * 當您 `git clone` 本專案時，若有正確安裝 Git LFS，`best.pt` 就會自動下載到專案根目錄。
+1. 模型權重 (Weights)
+最終微調完成的 `best.pt` 已透過 Git LFS (Large File Storage) 進行版本控制。
+請確保您的環境有安裝 Git LFS，在 `git clone` 時模型檔案會自動下載至根目錄。
 
-2. **資料集 (Dataset)**
-   * 由於幾萬張圖片過於龐大，未包含在此 Repo 中。
-   * 資料來源：[Kaggle - Garbage Detection (viswaprakash1990)](https://www.kaggle.com/datasets/viswaprakash1990/garbage-detection)
-   * 若需重新訓練，請自行下載並解壓縮，確保資料夾結構為：`archive/GARBAGE CLASSIFICATION/train/...`
+2. 基礎資料集
+由於體積龐大，原始訓練集並未包含在 Repo 中。若需從零訓練，請自行下載：
+來源：[Kaggle - Garbage Detection (viswaprakash1990)](https://www.kaggle.com/datasets/viswaprakash1990/garbage-detection)
 
-## 使用方式
+## 核心工具與腳本
 
-### 1. 圖形化測試
-圖形化介面，可以隨機抽取測試集中的照片進行預測，並展示 6合4 的動態標籤轉換效果。
+### 1. 資料標註與審查工具 (label_tool.py)
+專為本專案打造的輕量化標註軟體，用於標註機器人專屬視角的圖片。
+```bash
+python label_tool.py
+```
+- 自動讀取 custom_dataset/images 內的圖片。
+- 滑鼠拖曳畫框，按鍵盤 0~3 快速賦予標籤。
+- 支援讀取並顯示已標註的框，滑鼠點擊即可刪除錯誤標籤。
+
+### 2. 模型微調 (finetune.py)
+將基礎 6 類模型轉換為 4 類模型的微調腳本。內部已實作「凍結骨幹網路 (Freeze Backbone)」與「學習率優化」，確保小資料訓練的穩定性。
+```bash
+python finetune.py
+```
+
+### 3. 圖形化推論測試 (test_gui.py)
+內建 Agnostic NMS 機制（消除跨類別重複框）的視覺化測試介面。
 ```bash
 python test_gui.py
 ```
 
-### 2. 評估模型
-若要查看模型在測試集上的詳細數據（包含 Precision, Recall, mAP@50 等統計表格），請執行：
+### 4. 模型評估 (evaluate.py)
+計算並列印出模型在測試集上的詳細效能指標 (Precision, Recall, mAP)。
 ```bash
 python evaluate.py
 ```
 
-### 3. 重新訓練
-若您有更強的顯示卡（本專案原使用 RTX 5090 32GB 進行訓練），或者想加入自己的資料，請執行：
-```bash
-python train.py
-```
-> 💡 提示：`train.py` 預設的 batch size 為 32，若您的顯示卡 VRAM 較小（如 8GB），請進入 `train.py` 將 `batch` 改為 8 或 4，以避免 OOM 錯誤。
+### 5. 基礎訓練 (train.py)
+從頭訓練 6 類基礎模型的腳本。
+預設 batch=32（針對大容量 VRAM 優化）。若顯卡記憶體不足，請調低此數值。
 
-## 📄 授權 (License)
-資料集標註採用 CC BY 4.0 授權。程式碼部分可自由用於學術與專案交流。
+## 授權聲明 (License)
+本專案程式碼採用 MIT License 授權。
+資料集標註採用 CC BY 4.0 授權。
