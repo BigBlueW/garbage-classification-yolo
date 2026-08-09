@@ -15,7 +15,7 @@ graph TD
     A[自製機器人俯瞰圖片 custom_dataset] --> B(label_tool.py: 旋轉框互動標註)
     B -->|向下相容舊 HBB 標籤 & 輸出 8 點 OBB 標籤| C[custom_dataset.yaml]
     
-    D[yolo11x-obb.pt 官方預訓練權重] --> E(train_obb.py)
+    D[yolo11x-obb.pt 官方預訓練權重] --> E(train.py)
     C --> E
     
     E -->|端到端全權重訓練| F[專屬 4 類 OBB 模型 best.pt]
@@ -71,14 +71,14 @@ python label_tool.py
 - **切換資料集**：按 `T` 鍵可在 `train` 與 `test` 資料夾間無縫切換。
 - **換頁與儲存**：`A` (上一張), `D` / `Space` (下一張並自動儲存), `Q` (儲存退出)。
 
-### 2. 端到端 OBB 訓練 ([`train_obb.py`](train_obb.py))
+### 2. 端到端 OBB 訓練 ([`train.py`](train.py))
 直接以 `yolo11x-obb.pt` 為基底，在 `custom_dataset` 進行 300 輪全權重訓練。
 ```bash
-python train_obb.py
+python train.py
 ```
 
 ### 3. 圖形化推論與夾爪姿態測試 ([`test_gui.py`](test_gui.py))
-即時預測 OBB 旋轉框，並可視化展示**夾爪抓取姿態輔助線（Cyan Grasp Line）**與角度文字（Yaw $\theta$）。
+即時預測 OBB 旋轉框，支援跨類別 Agnostic NMS 消除重複，並可視化展示夾爪抓取輔助線與角度文字（Yaw $\theta$）。
 ```bash
 python test_gui.py
 ```
@@ -87,6 +87,12 @@ python test_gui.py
 自動檢測模型為 OBB 或 HBB，並在測試集上計算 Precision, Recall, mAP@50 與 mAP@50-95。
 ```bash
 python evaluate.py
+```
+
+### 5. 展示動圖產生器 ([`make_demo_gif.py`](make_demo_gif.py))
+一鍵將測試集預測結果輸出為每幀 1 秒的高畫質展示動圖 `demo.gif`。
+```bash
+python make_demo_gif.py
 ```
 
 ---
