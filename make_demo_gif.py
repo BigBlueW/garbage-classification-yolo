@@ -120,24 +120,37 @@ def main():
             cv2.putText(annotated, badge_text, (badge_x1, badge_y2 - pad_y),
                         cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), font_thick, cv2.LINE_AA)
 
-        # 4. 底部資訊條 (HUD Bar)
+        # 5. 統一輸出固定 9:16 尺寸 (寬 540 x 高 960)，
+        #    先讓標註影像左右貼齊邊界、上下以黑邊補滿並垂直置中，
+        #    最後再把 HUD 資訊條疊在畫布底部（確保每幀都顯示檔名）
+        canvas_w, canvas_h = 540, 960
         hud_h = 36
-        hud_bar = np.zeros((hud_h, w, 3), dtype=np.uint8)
+        canvas = np.zeros((canvas_h, canvas_w, 3), dtype=np.uint8)
+
+        scale = canvas_w / float(annotated.shape[1])
+        frame_h = int(round(annotated.shape[0] * scale))
+        usable_h = canvas_h - hud_h
+        if frame_h > usable_h:
+            scale = usable_h / float(annotated.shape[0])
+            frame_h = usable_h
+            frame_w = int(round(annotated.shape[1] * scale))
+            resized = cv2.resize(annotated, (frame_w, frame_h), interpolation=cv2.INTER_AREA)
+            x_offset = max(0, (canvas_w - frame_w) // 2)
+            canvas[0:frame_h, x_offset:x_offset + frame_w] = resized
+        else:
+            resized = cv2.resize(annotated, (canvas_w, frame_h), interpolation=cv2.INTER_AREA)
+            y_offset = (usable_h - frame_h) // 2
+            canvas[y_offset:y_offset + frame_h, :] = resized
+
+        hud_bar = np.zeros((hud_h, canvas_w, 3), dtype=np.uint8)
         hud_bar[:] = (25, 25, 25)
-        
         cv2.putText(hud_bar, f"YOLOv11-OBB Inference Demo [{idx+1}/{total_imgs}] {filename}", (15, 24),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
-        
         counts_str = f"Objects: {len(boxes_list)}"
-        cv2.putText(hud_bar, counts_str, (w - 150, 24),
+        cv2.putText(hud_bar, counts_str, (canvas_w - 160, 24),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 1, cv2.LINE_AA)
-        
-        final_frame = np.vstack([annotated, hud_bar])
-        
-        # 5. 調整尺寸至適合展示的解析度 (高度 720px)
-        target_h = 720
-        target_w = int(final_frame.shape[1] * (target_h / float(final_frame.shape[0])))
-        frame_resized = cv2.resize(final_frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
+        canvas[canvas_h - hud_h:, :] = hud_bar
+        frame_resized = canvas
         
         # 轉換為 RGB PIL Image 並做調色盤量化
         frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
