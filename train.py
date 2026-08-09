@@ -1,25 +1,41 @@
 import os
+import shutil
+import torch
 from ultralytics import YOLO
 
 def main():
-    model_path = "yolo11x.pt"
-        
-    model = YOLO(model_path) 
+    model_name = "yolo11x-obb.pt"
+    
+    device = "0" if torch.cuda.is_available() else "cpu"
+    print(f"🚀 準備啟動 YOLOv11-OBB 端到端訓練流程...")
+    print(f"📌 使用裝置: {device} | 基礎模型: {model_name}")
 
-    # Train the model
+    # 載入官方 OBB 預訓練模型
+    model = YOLO(model_name)
+
+    # 開始端到端 OBB 訓練
     results = model.train(
-        model=model_path,
-        data="dataset.yaml",
-        epochs=100,
+        data="custom_dataset.yaml",
+        epochs=300,
+        patience=50,
         imgsz=640,
-        batch=32,          # Optimized for RTX 5090 (32GB VRAM)
-        workers=16,        # Optimized for Ryzen 9950X (32 Threads)
-        cache=True,        # Leverages 128GB RAM to load all images into memory for blazing fast training
+        batch=16,
+        workers=8,
+        cache=True,
+        lr0=0.005,
         project="garbage_classification_runs",
-        name="yolo11x_garbage_model",
-        device="0"
+        name="yolo11x_obb_model",
+        device=device,
+        save=True
     )
-    print("Training finished. Weights saved to garbage_classification_runs/yolo11x_garbage_model/weights/")
+
+    best_weight = "garbage_classification_runs/yolo11x_obb_model/weights/best.pt"
+    if os.path.exists(best_weight):
+        shutil.copy(best_weight, "best.pt")
+        print(f"🎉 訓練完成！最佳權重已儲存至: {best_weight}")
+        print(f"📦 已自動更新根目錄 best.pt 為最新的 OBB 模型權重！")
+    else:
+        print("🎉 訓練結束！")
 
 if __name__ == '__main__':
     main()

@@ -1,98 +1,102 @@
-# AI Robotics - Garbage Classification (YOLOv11)
+# AI Robotics - Garbage Classification & Grasping (YOLOv11-OBB)
 
 ![Demo](demo.gif)
 
-這是一個專為機器手臂夾取與分類系統設計的 YOLOv11x 垃圾辨識模組。專案包含了從底層訓練、資料標註、到視角微調 (Fine-tuning) 的完整開發流程。
+這是一個專為**機器手臂夾爪 (Parallel Gripper)** 設計的 **YOLOv11-OBB (Oriented Bounding Box，旋轉邊界框)** 垃圾辨識與抓取姿態預測系統。
+
+系統直接在機器人真實俯瞰視角（鳥瞰、純黑桌面）上進行端到端訓練，並輸出帶有**平面旋轉姿態角度 ($\text{Yaw}, \theta$)**、中心抓取點與長短軸的邊界框，提供機械手臂最即時且精準的抓取資訊。
+
+---
 
 ## 專案工作流程 (Workflow)
 
-剛接觸本專案的新手，請參考以下工作流程圖，了解各腳本之間的協作關係：
-
 ```mermaid
 graph TD
-    A[Kaggle 資料集] -->|下載並解壓縮| B(train.py)
-    C[自製機器人視角圖片] -->|放入 custom_dataset/images| D(label_tool.py)
+    A[自製機器人俯瞰圖片 custom_dataset] --> B(label_tool.py: 旋轉框互動標註)
+    B -->|向下相容舊 HBB 標籤 & 輸出 8 點 OBB 標籤| C[custom_dataset.yaml]
     
-    D -->|產生 YOLO 格式標籤| E[自訂資料集與 yaml]
-    B -->|訓練| F[基礎 6 類模型]
+    D[yolo11x-obb.pt 官方預訓練權重] --> E(train.py)
+    C --> E
     
-    F -->|做為預訓練基底| G(finetune.py)
-    E -->|輸入資料| G
-    
-    G -->|微調與轉換分類層| H[專屬 4 類微調模型 best.pt]
-    H -->|部署與測試| I(test_gui.py)
-    H -->|準確率分析| J(evaluate.py)
+    E -->|端到端全權重訓練| F[專屬 4 類 OBB 模型 best.pt]
+    F --> G(test_gui.py: 夾爪抓取姿態可視化)
+    F --> H(evaluate.py: OBB mAP 評估分析)
 ```
 
-## 專案架構與分類邏輯
+---
 
-本專案採用「兩階段訓練」策略，以克服開源資料集與實際機器人視角間的環境落差 (Domain Gap)：
+## 專案分類與抓取邏輯
 
-1. 基礎模型 (6大類)
-利用 Kaggle 大型資料集進行初步訓練，建立模型對垃圾紋理與反光的基礎認知。
-類別：BIODEGRADABLE(廚餘), CARDBOARD(紙板), GLASS(玻璃), METAL(金屬), PAPER(紙張), PLASTIC(塑膠)。
+模型輸出為機器手臂夾取的 4 大分類：
+- `0: plastic` (塑膠)
+- `1: metal` (金屬)
+- `2: paper` (紙類)
+- `3: general_waste` (一般垃圾)
 
-2. 機器人專屬微調模型 (4大類)
-使用符合機器人真實視角（正上方鳥瞰、純黑桌面）的自訂資料集進行微調 (Fine-tuning)。
-最終輸出類別：plastic(塑膠), metal(金屬), paper(紙類), general_waste(一般垃圾)。
+對於長條形物體（寶特瓶、鐵罐、紙盒），模型預測出精準的 OBB 角度，夾爪直接垂直於長軸閉合；對於球狀/不規則形狀（如揉成一團的紙球），任意角度皆可抓取。
+
+---
 
 ## 環境與安裝
 
-1. 建立虛擬環境
+1. **建立虛擬環境**
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate  # Linux/macOS
+source .venv/bin/activate  # Linux / macOS
 # Windows: .venv\Scripts\activate
 ```
 
-2. 安裝依賴套件
+2. **安裝依賴套件**
 ```bash
 pip install -r requirements.txt
 ```
 
-## 資料準備與權重
+---
 
-1. 模型權重 (Weights)
-最終微調完成的 `best.pt` 已透過 Git LFS (Large File Storage) 進行版本控制。
-請確保您的環境有安裝 Git LFS，在 `git clone` 時模型檔案會自動下載至根目錄。
+## 核心工具與操作說明
 
-2. 基礎資料集
-由於體積龐大，原始訓練集並未包含在 Repo 中。若需從零訓練，請自行下載：
-來源：[Kaggle - Garbage Detection (viswaprakash1990)](https://www.kaggle.com/datasets/viswaprakash1990/garbage-detection)
-
-## 核心工具與腳本
-
-### 1. 資料標註與審查工具 (label_tool.py)
-專為本專案打造的輕量化標註軟體，用於標註機器人專屬視角的圖片。
+### 1. 旋轉框標註與檢查工具 ([`label_tool.py`](label_tool.py))
+專為機器人夾取任務打造的互動式 OBB 標註軟體，支援既有標籤無損讀入與即時旋轉編輯。
 ```bash
 python label_tool.py
 ```
-- 自動讀取 custom_dataset/images 內的圖片。
-- 滑鼠拖曳畫框，按鍵盤 0~3 快速賦予標籤。
-- 支援讀取並顯示已標註的框，滑鼠點擊即可刪除錯誤標籤。
+- **向下相容**：自動將舊有的 5 欄位水平標籤 (HBB) 載入為初始角度為 $0^\circ$ 的矩形。
+- **選取框**：滑鼠左鍵點選框，顯示黃色旋轉手把與角落/邊緣拉伸節點。
+- **旋轉角度**：
+  - 拖曳頂部**黃色旋轉手把**。
+  - 選取狀態下滾動**滑鼠滾輪**（或按 `R` / `E` / `[` / `]`）。
+- **長寬拉伸**：拖曳角落或邊緣小方塊（嚴格維持 90 度矩形幾何）。
+- **切換類別**：按鍵盤數字鍵 `0` ~ `3` 即時切換。
+- **刪除標籤**：按鍵盤 `Delete` / `Backspace` / `X` 或滑鼠右鍵點擊。
+- **切換資料集**：按 `T` 鍵可在 `train` 與 `test` 資料夾間無縫切換。
+- **換頁與儲存**：`A` (上一張), `D` / `Space` (下一張並自動儲存), `Q` (儲存退出)。
 
-### 2. 模型微調 (finetune.py)
-將基礎 6 類模型轉換為 4 類模型的微調腳本。內部已實作「凍結骨幹網路 (Freeze Backbone)」與「學習率優化」，確保小資料訓練的穩定性。
+### 2. 端到端 OBB 訓練 ([`train.py`](train.py))
+直接以 `yolo11x-obb.pt` 為基底，在 `custom_dataset` 進行 300 輪全權重訓練。
 ```bash
-python finetune.py
+python train.py
 ```
 
-### 3. 圖形化推論測試 (test_gui.py)
-內建 Agnostic NMS 機制（消除跨類別重複框）的視覺化測試介面。
+### 3. 圖形化推論與夾爪姿態測試 ([`test_gui.py`](test_gui.py))
+即時預測 OBB 旋轉框，支援跨類別 Agnostic NMS 消除重複，並可視化展示夾爪抓取輔助線與角度文字（Yaw $\theta$）。
 ```bash
 python test_gui.py
 ```
 
-### 4. 模型評估 (evaluate.py)
-計算並列印出模型在測試集上的詳細效能指標 (Precision, Recall, mAP)。
+### 4. 模型評估與 mAP 分析 ([`evaluate.py`](evaluate.py))
+自動檢測模型為 OBB 或 HBB，並在測試集上計算 Precision, Recall, mAP@50 與 mAP@50-95。
 ```bash
 python evaluate.py
 ```
 
-### 5. 基礎訓練 (train.py)
-從頭訓練 6 類基礎模型的腳本。
-預設 batch=32（針對大容量 VRAM 優化）。若顯卡記憶體不足，請調低此數值。
+### 5. 展示動圖產生器 ([`make_demo_gif.py`](make_demo_gif.py))
+一鍵將測試集預測結果輸出為每幀 1 秒的高畫質展示動圖 `demo.gif`。
+```bash
+python make_demo_gif.py
+```
+
+---
 
 ## 授權聲明 (License)
-本專案程式碼採用 MIT License 授權。
-資料集標註採用 CC BY 4.0 授權。
+- 本專案程式碼採用 MIT License 授權。
+- 資料集標註採用 CC BY 4.0 授權。
