@@ -12,8 +12,8 @@
 
 ```mermaid
 graph TD
-    A[自製機器人俯瞰圖片 custom_dataset] --> B(label_tool.py: 旋轉框互動標註)
-    B -->|向下相容舊 HBB 標籤 & 輸出 8 點 OBB 標籤| C[custom_dataset.yaml]
+    A[俯瞰圖片 custom_dataset] --> B(label_tool.py: 旋轉框互動標註)
+    B --> C[custom_dataset.yaml]
     
     D[yolo11x-obb.pt 官方預訓練權重] --> E(train.py)
     C --> E
@@ -25,15 +25,18 @@ graph TD
 
 ---
 
-## 專案分類與抓取邏輯
+## 專案分類與機械手臂抓取策略
 
-模型輸出為機器手臂夾取的 4 大分類：
-- `0: plastic` (塑膠)
-- `1: metal` (金屬)
-- `2: paper` (紙類)
-- `3: general_waste` (一般垃圾)
+模型輸出專為機器人夾取設計的 4 大類別：
+- `0: plastic` (可回收塑膠：寶特瓶、手搖飲塑膠杯、布丁杯等)
+- `1: metal` (可回收金屬：鋁罐、鐵罐、八寶粥罐、咖啡罐等)
+- `2: paper` (可回收結構性紙容器：麥香鋁箔包、純喫茶新鮮屋紙盒、泡麵紙碗、便當紙盒等)
+- `3: general_waste` (一般垃圾與非抓取目標：衛生紙團、廢紙屑/平鋪紙張、塑膠包裝袋、吸管等)
 
-對於長條形物體（寶特瓶、鐵罐、紙盒），模型預測出精準的 OBB 角度，夾爪直接垂直於長軸閉合；對於球狀/不規則形狀（如揉成一團的紙球），任意角度皆可抓取。
+> 紙張歸類為一般垃圾：
+> 1. **外觀紋理歧義 (Visual Ambiguity)**：從俯瞰視角看，揉成一團的紙屑與揉成一團的抽取式衛生紙在材質、反光與形狀上極難區分。
+> 2. **夾爪物理抓取限制 (Gripper Physics Constraint)**：平行二指夾爪 (Parallel Gripper) 無法直接夾取平鋪於桌面上的薄紙張（缺少高度與夾取間隙），因此將平鋪紙張與不可回收物統一歸類為 `general_waste`。
+> 3. **專注高價值回收容器**：將 `paper` 類別聚焦在具有立體結構與體積的**鋁箔包、紙盒與便當盒**，利於夾爪計算旋轉角度精確閉合夾取。
 
 ---
 
@@ -89,7 +92,13 @@ python test_gui.py
 python evaluate.py
 ```
 
-### 5. 展示動圖產生器 ([`make_demo_gif.py`](make_demo_gif.py))
+### 5. AI 半自動預標註工具 ([`auto_label.py`](auto_label.py))
+一鍵使用當前最佳的 `best.pt` 模型為所有新加入、尚未標註的照片自動產生初始 OBB 旋轉框，減少手動標註時間。
+```bash
+python auto_label.py
+```
+
+### 6. 展示動圖產生器 ([`make_demo_gif.py`](make_demo_gif.py))
 一鍵將測試集預測結果輸出為每幀 1 秒的高畫質展示動圖 `demo.gif`。
 ```bash
 python make_demo_gif.py

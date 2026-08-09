@@ -1,11 +1,69 @@
 import os
 import glob
+import re
 import math
 import numpy as np
 import cv2
 
 DATASET_ROOT = "custom_dataset"
 DATASETS = ["train", "test"]
+
+def auto_standardize_filenames(dataset_name):
+    """
+    自動掃描 dataset_name (如 train / test) 資料夾。
+    若發現未符合 {prefix}_{idx:03d}.ext 格式的新圖片，
+    會自動接續當前最大編號，同步將圖片與對應 txt 標籤重命名為標準格式。
+    """
+    images_dir = os.path.join(DATASET_ROOT, dataset_name, "images")
+    labels_dir = os.path.join(DATASET_ROOT, dataset_name, "labels")
+    if not os.path.exists(images_dir):
+        return
+
+    extensions = ["*.jpg", "*.jpeg", "*.png", "*.webp"]
+    all_imgs = []
+    for ext in extensions:
+        all_imgs.extend(glob.glob(os.path.join(images_dir, ext)))
+        all_imgs.extend(glob.glob(os.path.join(images_dir, ext.upper())))
+
+    prefix = dataset_name
+    pattern = re.compile(rf"^{prefix}_(\d+)\.(jpg|jpeg|png|webp)$", re.IGNORECASE)
+
+    standard_indices = []
+    non_standard_files = []
+
+    for img_path in all_imgs:
+        filename = os.path.basename(img_path)
+        match = pattern.match(filename)
+        if match:
+            standard_indices.append(int(match.group(1)))
+        else:
+            non_standard_files.append(img_path)
+
+    if not non_standard_files:
+        return
+
+    max_idx = max(standard_indices) if standard_indices else 0
+    non_standard_files = sorted(non_standard_files)
+
+    print(f"\n✨ 自動偵測到 {len(non_standard_files)} 張新加入的圖片，正在自動標準化檔名編號...")
+    for old_img_path in non_standard_files:
+        max_idx += 1
+        old_filename = os.path.basename(old_img_path)
+        name, ext = os.path.splitext(old_filename)
+        ext = ext.lower()
+
+        new_base = f"{prefix}_{max_idx:03d}"
+        new_img_path = os.path.join(images_dir, f"{new_base}{ext}")
+        old_lbl_path = os.path.join(labels_dir, name + ".txt")
+        new_lbl_path = os.path.join(labels_dir, f"{new_base}.txt")
+
+        os.rename(old_img_path, new_img_path)
+        if os.path.exists(old_lbl_path):
+            os.rename(old_lbl_path, new_lbl_path)
+
+        print(f"  • {old_filename} -> {new_base}{ext}")
+
+    print(f"🎉 檔名標準化完成！{dataset_name} 當前總圖片數已擴充至: {max_idx} 張\n")
 
 CLASSES = {
     ord('0'): (0, "Plastic"),
@@ -18,9 +76,9 @@ CLASS_NAMES = ["Plastic", "Metal", "Paper", "General Waste"]
 
 COLORS = [
     (0, 255, 0),     # 0: Plastic - 綠色 (BGR)
-    (255, 255, 0),   # 1: Metal - 青黃色
-    (0, 165, 255),   # 2: Paper - 橘色
-    (200, 200, 200)  # 3: General Waste - 灰色
+    (255, 230, 0),   # 1: Metal - 亮青黃色
+    (0, 140, 255),   # 2: Paper - 鮮橘色
+    (255, 0, 255)    # 3: General Waste - 螢光洋紅/亮紫紅 (超高對比，一眼看清)
 ]
 
 class OBBBox:
@@ -430,6 +488,7 @@ def main():
 
     img_idx = 0
     extensions = ["*.jpg", "*.jpeg", "*.png", "*.webp"]
+    is_first_scan = True
 
     while True:
         dataset_name = DATASETS[current_dataset_idx]
@@ -438,6 +497,9 @@ def main():
 
         os.makedirs(images_dir, exist_ok=True)
         os.makedirs(labels_dir, exist_ok=True)
+
+        # 自動檢測並將新圖片標準化命名為 train_xxx / test_xxx
+        auto_standardize_filenames(dataset_name)
 
         image_paths = []
         for ext in extensions:
@@ -455,9 +517,21 @@ def main():
             if key == ord('t'):
                 current_dataset_idx = (current_dataset_idx + 1) % len(DATASETS)
                 img_idx = 0
+                is_first_scan = True
                 continue
             else:
                 break
+
+        # 首次啟動或切換資料集時，自動跳轉至第一張「尚未標註」的新照片
+        if is_first_scan:
+            for idx_check, p_check in enumerate(image_paths):
+                chk_name, _ = os.path.splitext(os.path.basename(p_check))
+                chk_txt = os.path.join(labels_dir, chk_name + ".txt")
+                if not os.path.exists(chk_txt) or os.path.getsize(chk_txt) == 0:
+                    img_idx = idx_check
+                    print(f"📍 自動定位至尚未標註的第一張新圖片: [第 {img_idx+1} / {len(image_paths)} 張] {os.path.basename(p_check)}")
+                    break
+            is_first_scan = False
 
         img_idx = max(0, min(img_idx, len(image_paths) - 1))
         img_path = image_paths[img_idx]

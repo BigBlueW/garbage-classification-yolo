@@ -15,7 +15,7 @@ CLASS_COLORS = {
     0: (46, 204, 113),   # plastic - 綠色
     1: (235, 152, 52),   # metal - 藍色
     2: (34, 126, 230),   # paper - 橘色
-    3: (182, 89, 155)    # general_waste - 紫色
+    3: (255, 0, 255)     # general_waste - 螢光洋紅/亮紫紅
 }
 
 def natural_sort_key(s):

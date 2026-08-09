@@ -22,7 +22,7 @@ CLASS_COLORS = {
     0: (46, 204, 113),   # plastic - 翠綠色
     1: (235, 152, 52),   # metal - 藍青色
     2: (34, 126, 230),   # paper - 亮橘色
-    3: (182, 89, 155)    # general_waste - 紫灰色
+    3: (255, 0, 255)     # general_waste - 螢光洋紅/亮紫紅 (超高對比，極清晰)
 }
 
 def obb_iou(pts1, pts2):
@@ -151,10 +151,10 @@ class App(ctk.CTk):
         self.legend_frame.grid(row=9, column=0, padx=20, pady=10, sticky="w")
         
         legend_items = [
-            ("Plastic", "#71cc2e"),
+            ("Plastic", "#2ecc71"),
             ("Metal", "#3498db"),
             ("Paper", "#e67e22"),
-            ("General Waste", "#9b59b6")
+            ("General Waste", "#ff00ff")
         ]
         for idx, (c_name, c_hex) in enumerate(legend_items):
             lbl = ctk.CTkLabel(
