@@ -1,30 +1,41 @@
 import os
+import argparse
 from ultralytics import YOLO
 
-# 模型路徑
 MODEL_PATH = "best.pt"
 
 def main():
-    if not os.path.exists(MODEL_PATH):
-        print(f"❌ 找不到模型檔案: {MODEL_PATH}，請確認訓練是否已經完成！")
+    parser = argparse.ArgumentParser(description="評估 YOLO 模型在 test 或 val 上的指標")
+    parser.add_argument("--split", default="test", choices=["val", "test"],
+                        help="要評估的資料分群 (預設: test)")
+    parser.add_argument("--model", default=MODEL_PATH, help=f"模型路徑 (預設: {MODEL_PATH})")
+    args = parser.parse_args()
+
+    model_path = args.model
+    if not os.path.exists(model_path):
+        print(f"❌ 找不到模型檔案: {model_path}，請先確認是否已經完成！")
         return
 
-    print(f"🚀 載入模型進行評估: {MODEL_PATH}")
-    model = YOLO(MODEL_PATH)
+    print(f"🚀 載入模型進行評估: {model_path}")
+    model = YOLO(model_path)
 
     # 選擇資料集配置檔
     data_yaml = "custom_dataset.yaml" if os.path.exists("custom_dataset.yaml") else "dataset.yaml"
-    print(f"🔍 開始在測試集 ({data_yaml} -> val/test) 上進行驗證...")
+    print(f"🔍 開始在 ({data_yaml} -> {args.split}) 上進行驗證...")
     
-    metrics = model.val(data=data_yaml, split="val")
+    metrics = model.val(data=data_yaml, split=args.split)
 
     print("\n" + "="*55)
-    print("📊 測試集評估結果 (Test Set Metrics)")
+    print(f"📊 {args.split.upper()} 評估結果 ({args.split} Metrics)")
     print("="*55)
 
-    # 判斷是 OBB 還是 HBB
-    metric_obj = metrics.obb if hasattr(metrics, 'obb') and metrics.obb is not None else metrics.box
-    task_type = "OBB (Oriented Bounding Box)" if metric_obj == getattr(metrics, 'obb', None) else "HBB (Horizontal Box)"
+    # 判斷是 OBB 還是 HBB（改用 model.task，較可靠）
+    if getattr(model, "task", None) == "obb" or "obb" in str(getattr(model, "model", "")).lower():
+        metric_obj = metrics.obb if hasattr(metrics, 'obb') and metrics.obb is not None else metrics.box
+        task_type = "OBB (Oriented Bounding Box)"
+    else:
+        metric_obj = metrics.box
+        task_type = "HBB (Horizontal Box)"
     
     print(f"任務類型: {task_type}")
     print("-" * 55)

@@ -6,7 +6,7 @@ from ultralytics import YOLO
 
 MODEL_PATH = "best.pt"
 DATASET_ROOT = "custom_dataset"
-DATASETS = ["train", "test"]
+DATASETS = ["train", "val", "test"]
 
 def obb_iou(pts1, pts2):
     p1 = np.ascontiguousarray(pts1, dtype=np.float32)

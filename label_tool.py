@@ -6,7 +6,7 @@ import numpy as np
 import cv2
 
 DATASET_ROOT = "custom_dataset"
-DATASETS = ["train", "test"]
+DATASETS = ["train", "val", "test"]
 
 def auto_standardize_filenames(dataset_name):
     """
@@ -482,7 +482,7 @@ def main():
     print("  • Delete / X / 右鍵: 刪除選取框")
     print("  • Z 鍵           : 復原 (Undo)")
     print("  • A / D / Space  : 上一張 / 下一張（自動存檔）")
-    print("  • T 鍵           : 切換 train / test 資料集")
+    print("  • T 鍵           : 切換 train / val / test 資料集")
     print("  • Q / Esc        : 儲存並離開")
     print("="*55)
 
