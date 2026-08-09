@@ -7,9 +7,10 @@ __pycache__/
 .vscode/
 .idea/
 
-# Datasets
+# Datasets & Caches
 archive/
 archive.zip
+*.cache
 
 # Model Weights
 yolo*.pt

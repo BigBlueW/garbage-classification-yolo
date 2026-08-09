@@ -1,9 +1,11 @@
 import os
 import glob
+import math
+import numpy as np
 import cv2
 
-IMAGES_DIR = "custom_dataset/train/images"
-LABELS_DIR = "custom_dataset/train/labels"
+DATASET_ROOT = "custom_dataset"
+DATASETS = ["train", "test"]
 
 CLASSES = {
     ord('0'): (0, "Plastic"),
@@ -12,92 +14,152 @@ CLASSES = {
     ord('3'): (3, "General Waste")
 }
 
-colors = [
-    (0, 255, 0),    # 0: Plastic - 綠色
-    (255, 255, 0),  # 1: Metal - 青色
-    (0, 165, 255),  # 2: Paper - 橘色
-    (200, 200, 200) # 3: General - 灰色
+CLASS_NAMES = ["Plastic", "Metal", "Paper", "General Waste"]
+
+COLORS = [
+    (0, 255, 0),     # 0: Plastic - 綠色 (BGR)
+    (255, 255, 0),   # 1: Metal - 青黃色
+    (0, 165, 255),   # 2: Paper - 橘色
+    (200, 200, 200)  # 3: General Waste - 灰色
 ]
 
-drawing = False
-ix, iy = -1, -1
-temp_box = None
-boxes = []  # 存放 (class_id, x1, y1, x2, y2)
-img = None
-clone = None
-w, h = 0, 0
+class OBBBox:
+    def __init__(self, cls_id, cx, cy, w, h, angle_deg=0.0):
+        self.cls_id = int(cls_id)
+        self.cx = float(cx)
+        self.cy = float(cy)
+        self.w = max(5.0, float(w))
+        self.h = max(5.0, float(h))
+        self.angle_deg = float(angle_deg) % 360.0
 
-def draw_bbox(event, x, y, flags, param):
-    global ix, iy, drawing, temp_box, clone, img, boxes
-
-    if event == cv2.EVENT_LBUTTONDOWN:
-        # 檢查點擊是否在任何已存在的框內
-        clicked_box_idx = -1
-        # 從最後一個畫的框開始檢查（最上層）
-        for i in range(len(boxes)-1, -1, -1):
-            cls_id, bx1, by1, bx2, by2 = boxes[i]
-            if bx1 <= x <= bx2 and by1 <= y <= by2:
-                clicked_box_idx = i
-                break
+    def get_corners(self):
+        rad = math.radians(self.angle_deg)
+        cos_a = math.cos(rad)
+        sin_a = math.sin(rad)
+        hw, hh = self.w / 2.0, self.h / 2.0
         
-        if clicked_box_idx != -1:
-            # 如果點在框內，直接刪除該框
-            boxes.pop(clicked_box_idx)
-            redraw_boxes()
-        else:
-            # 如果點在空白處，開始畫新框
-            drawing = True
-            ix, iy = x, y
+        # Local corners: top-left (p0), top-right (p1), bottom-right (p2), bottom-left (p3)
+        local_pts = [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)]
+        world_pts = []
+        for lx, ly in local_pts:
+            wx = lx * cos_a - ly * sin_a + self.cx
+            wy = lx * sin_a + ly * cos_a + self.cy
+            world_pts.append((wx, wy))
+        return world_pts
 
-    elif event == cv2.EVENT_MOUSEMOVE:
-        if drawing:
-            img = clone.copy()
-            for b in boxes:
-                cls_id, bx1, by1, bx2, by2 = b
-                cv2.rectangle(img, (bx1, by1), (bx2, by2), colors[cls_id], 2)
-            cv2.rectangle(img, (ix, iy), (x, y), (0, 0, 255), 2)
+    def get_rotation_handle(self, offset=30.0):
+        rad = math.radians(self.angle_deg)
+        cos_a = math.cos(rad)
+        sin_a = math.sin(rad)
+        hh = self.h / 2.0
+        # Local position along negative Y axis (top direction)
+        lx, ly = 0.0, -hh - offset
+        wx = lx * cos_a - ly * sin_a + self.cx
+        wy = lx * sin_a + ly * cos_a + self.cy
+        # Top edge midpoint
+        tm_x = 0.0 * cos_a - (-hh) * sin_a + self.cx
+        tm_y = 0.0 * sin_a + (-hh) * cos_a + self.cy
+        return (wx, wy), (tm_x, tm_y)
 
-    elif event == cv2.EVENT_LBUTTONUP:
-        if drawing:
-            drawing = False
-            x1, x2 = min(ix, x), max(ix, x)
-            y1, y2 = min(iy, y), max(iy, y)
-            if x2 - x1 > 10 and y2 - y1 > 10:
-                temp_box = (x1, y1, x2, y2)
-                redraw_boxes()
-                cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 255), 2)
-                cv2.putText(img, "Press 0:Plastic, 1:Metal, 2:Paper, 3:General", (x1, max(30, y1-10)), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+    def get_edge_midpoints(self):
+        rad = math.radians(self.angle_deg)
+        cos_a = math.cos(rad)
+        sin_a = math.sin(rad)
+        hw, hh = self.w / 2.0, self.h / 2.0
+        # Top, Right, Bottom, Left midpoints
+        local_mids = [(0, -hh), (hw, 0), (0, hh), (-hw, 0)]
+        world_mids = []
+        for lx, ly in local_mids:
+            wx = lx * cos_a - ly * sin_a + self.cx
+            wy = lx * sin_a + ly * cos_a + self.cy
+            world_mids.append((wx, wy))
+        return world_mids
 
-def redraw_boxes():
-    global img, clone
-    img = clone.copy()
-    for b in boxes:
-        cls_id, x1, y1, x2, y2 = b
-        c_color = colors[cls_id]
-        c_name = [v[1] for k,v in CLASSES.items() if v[0] == cls_id][0]
-        cv2.rectangle(img, (x1, y1), (x2, y2), c_color, 2)
-        cv2.putText(img, c_name, (x1, max(20, y1-5)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, c_color, 2)
+    def to_local(self, px, py):
+        dx = px - self.cx
+        dy = py - self.cy
+        rad = math.radians(-self.angle_deg)
+        lx = dx * math.cos(rad) - dy * math.sin(rad)
+        ly = dx * math.sin(rad) + dy * math.cos(rad)
+        return lx, ly
 
-def load_yolo_labels(txt_path, img_w, img_h):
-    loaded_boxes = []
-    if os.path.exists(txt_path):
-        with open(txt_path, 'r') as f:
-            for line in f:
-                parts = line.strip().split()
-                if len(parts) == 5:
-                    cls_id = int(parts[0])
-                    cx, cy, bw, bh = map(float, parts[1:])
-                    # 將 YOLO 的正規化座標轉換回像素座標
-                    x1 = int((cx - bw/2) * img_w)
-                    y1 = int((cy - bh/2) * img_h)
-                    x2 = int((cx + bw/2) * img_w)
-                    y2 = int((cy + bh/2) * img_h)
-                    loaded_boxes.append((cls_id, x1, y1, x2, y2))
-    return loaded_boxes
+    def contains_point(self, px, py):
+        lx, ly = self.to_local(px, py)
+        return abs(lx) <= (self.w / 2.0) and abs(ly) <= (self.h / 2.0)
 
-def save_yolo_labels(txt_path, img_w, img_h):
-    # 若該圖片最後沒有任何框，則刪除 txt，避免產生空檔案
+    def copy(self):
+        return OBBBox(self.cls_id, self.cx, self.cy, self.w, self.h, self.angle_deg)
+
+
+# Global State
+current_dataset_idx = 0
+boxes = []
+selected_box_idx = -1
+history_stack = []
+
+# Interaction Modes: 'IDLE', 'DRAWING_NEW', 'MOVING', 'ROTATING', 'RESIZING_HANDLE'
+interaction_mode = 'IDLE'
+drag_start_pos = (0, 0)
+drag_start_box = None
+active_handle_idx = -1  # 0~3 for corners, 4~7 for edges, 8 for rotation handle
+
+def push_history():
+    global history_stack
+    history_stack.append([b.copy() for b in boxes])
+    if len(history_stack) > 20:
+        history_stack.pop(0)
+
+def undo():
+    global boxes, selected_box_idx, history_stack
+    if history_stack:
+        boxes = history_stack.pop()
+        selected_box_idx = min(selected_box_idx, len(boxes) - 1)
+        print("↩️ 已復原上一步操作")
+
+def load_labels(txt_path, img_w, img_h):
+    loaded = []
+    if not os.path.exists(txt_path):
+        return loaded
+
+    with open(txt_path, 'r') as f:
+        for line in f:
+            parts = line.strip().split()
+            if len(parts) == 5:
+                # Standard HBB: cls cx cy w h (normalized)
+                cls_id = int(parts[0])
+                cx = float(parts[1]) * img_w
+                cy = float(parts[2]) * img_h
+                w = float(parts[3]) * img_w
+                h = float(parts[4]) * img_h
+                loaded.append(OBBBox(cls_id, cx, cy, w, h, 0.0))
+            elif len(parts) == 9:
+                # Standard YOLO OBB: cls x1 y1 x2 y2 x3 y3 x4 y4 (normalized)
+                cls_id = int(parts[0])
+                x1, y1 = float(parts[1]) * img_w, float(parts[2]) * img_h
+                x2, y2 = float(parts[3]) * img_w, float(parts[4]) * img_h
+                x3, y3 = float(parts[5]) * img_w, float(parts[6]) * img_h
+                x4, y4 = float(parts[7]) * img_w, float(parts[8]) * img_h
+                
+                # Compute center, width, height, and orientation angle
+                pts = np.array([(x1, y1), (x2, y2), (x3, y3), (x4, y4)], dtype=np.float32)
+                cx = float(np.mean(pts[:, 0]))
+                cy = float(np.mean(pts[:, 1]))
+                
+                # Vector along top edge p0 -> p1
+                vx = x2 - x1
+                vy = y2 - y1
+                w = float(math.hypot(vx, vy))
+                
+                # Vector along side edge p1 -> p2
+                ux = x3 - x2
+                uy = y3 - y2
+                h = float(math.hypot(ux, uy))
+                
+                angle_deg = float(math.degrees(math.atan2(vy, vx))) % 360.0
+                loaded.append(OBBBox(cls_id, cx, cy, w, h, angle_deg))
+    return loaded
+
+def save_labels(txt_path, img_w, img_h):
     if len(boxes) == 0:
         if os.path.exists(txt_path):
             os.remove(txt_path)
@@ -105,102 +167,393 @@ def save_yolo_labels(txt_path, img_w, img_h):
 
     with open(txt_path, "w") as f:
         for b in boxes:
-            cls_id, x1, y1, x2, y2 = b
-            center_x = ((x1 + x2) / 2.0) / img_w
-            center_y = ((y1 + y2) / 2.0) / img_h
-            bw_norm = (x2 - x1) / float(img_w)
-            bh_norm = (y2 - y1) / float(img_h)
-            f.write(f"{cls_id} {center_x:.6f} {center_y:.6f} {bw_norm:.6f} {bh_norm:.6f}\n")
+            corners = b.get_corners()
+            # Normalize 4 corners coordinates
+            norm_pts = []
+            for px, py in corners:
+                nx = max(0.0, min(1.0, px / float(img_w)))
+                ny = max(0.0, min(1.0, py / float(img_h)))
+                norm_pts.append(f"{nx:.6f} {ny:.6f}")
+            pts_str = " ".join(norm_pts)
+            f.write(f"{b.cls_id} {pts_str}\n")
 
-def main():
-    global img, clone, temp_box, boxes, w, h
-    
-    extensions = ["*.jpg", "*.jpeg", "*.png", "*.webp"]
-    image_paths = []
-    for ext in extensions:
-        image_paths.extend(glob.glob(os.path.join(IMAGES_DIR, ext)))
-        image_paths.extend(glob.glob(os.path.join(IMAGES_DIR, ext.upper())))
-    image_paths = sorted(image_paths)
+def dist(p1, p2):
+    return math.hypot(p1[0] - p2[0], p1[1] - p2[1])
 
-    if not image_paths:
-        print("沒有找到任何圖片。")
+def on_mouse(event, x, y, flags, param):
+    global interaction_mode, drag_start_pos, drag_start_box, active_handle_idx
+    global selected_box_idx, boxes
+
+    HANDLE_RADIUS = 10
+    # Compensate for 42px header banner offset
+    y_adj = y - 42
+
+    # 1. MOUSE WHEEL FOR ROTATION
+    if event == cv2.EVENT_MOUSEWHEEL:
+        if selected_box_idx >= 0 and selected_box_idx < len(boxes):
+            push_history()
+            delta = 2.0
+            if flags & cv2.EVENT_FLAG_SHIFTKEY:
+                delta = 10.0
+            elif flags & cv2.EVENT_FLAG_CTRLKEY:
+                delta = 0.5
+            
+            # Check wheel direction
+            if flags > 0:
+                boxes[selected_box_idx].angle_deg = (boxes[selected_box_idx].angle_deg + delta) % 360.0
+            else:
+                boxes[selected_box_idx].angle_deg = (boxes[selected_box_idx].angle_deg - delta) % 360.0
+            return
+
+    # 2. RIGHT CLICK TO DELETE OR DESELECT
+    if event == cv2.EVENT_RBUTTONDOWN:
+        if y_adj < 0:
+            return
+        for i in range(len(boxes) - 1, -1, -1):
+            if boxes[i].contains_point(x, y_adj):
+                push_history()
+                print(f"🗑️ 刪除框: {CLASS_NAMES[boxes[i].cls_id]}")
+                boxes.pop(i)
+                selected_box_idx = -1
+                return
+        selected_box_idx = -1
         return
 
-    cv2.namedWindow("Label & Review Tool")
-    cv2.setMouseCallback("Label & Review Tool", draw_bbox)
+    # 3. LEFT BUTTON DOWN
+    if event == cv2.EVENT_LBUTTONDOWN:
+        if y_adj < 0:
+            return
+        drag_start_pos = (x, y_adj)
 
-    print("\n" + "="*40)
-    print(" 歡迎使用全能垃圾標註與檢查工具")
-    print("="*40)
-    print("操作說明:")
-    print("  左鍵點擊已存在的框 : 直接刪除該框 (Delete)")
-    print("  左鍵拖曳 : 畫出新的框，然後按 0~3 賦予標籤")
-    print("\n導覽鍵:")
-    print("  a : 上一張圖片 (會自動存檔)")
-    print("  d 或 Space : 下一張圖片 (會自動存檔)")
-    print("  q : 儲存並離開程式")
-    print("="*40)
+        # Check if clicking on active handle of currently selected box
+        if selected_box_idx >= 0 and selected_box_idx < len(boxes):
+            cur_box = boxes[selected_box_idx]
+            rot_handle, _ = cur_box.get_rotation_handle()
+            corners = cur_box.get_corners()
+            edge_mids = cur_box.get_edge_midpoints()
+
+            # A. Rotation Handle Check
+            if dist((x, y_adj), rot_handle) <= HANDLE_RADIUS + 5:
+                push_history()
+                interaction_mode = 'ROTATING'
+                drag_start_box = cur_box.copy()
+                return
+
+            # B. Corner Handles Check (0: TL, 1: TR, 2: BR, 3: BL)
+            for c_idx, cp in enumerate(corners):
+                if dist((x, y_adj), cp) <= HANDLE_RADIUS + 5:
+                    push_history()
+                    interaction_mode = 'RESIZING_HANDLE'
+                    active_handle_idx = c_idx
+                    drag_start_box = cur_box.copy()
+                    return
+
+            # C. Edge Handles Check (4: Top, 5: Right, 6: Bottom, 7: Left)
+            for e_idx, ep in enumerate(edge_mids):
+                if dist((x, y_adj), ep) <= HANDLE_RADIUS + 5:
+                    push_history()
+                    interaction_mode = 'RESIZING_HANDLE'
+                    active_handle_idx = 4 + e_idx
+                    drag_start_box = cur_box.copy()
+                    return
+
+        # Check if clicking inside any box (Select & Move)
+        clicked_idx = -1
+        for i in range(len(boxes) - 1, -1, -1):
+            if boxes[i].contains_point(x, y_adj):
+                clicked_idx = i
+                break
+
+        if clicked_idx != -1:
+            push_history()
+            selected_box_idx = clicked_idx
+            interaction_mode = 'MOVING'
+            drag_start_box = boxes[clicked_idx].copy()
+        else:
+            # Click on empty space -> Start drawing a new box
+            interaction_mode = 'DRAWING_NEW'
+            selected_box_idx = -1
+
+    # 4. MOUSE MOVE
+    elif event == cv2.EVENT_MOUSEMOVE:
+        if interaction_mode == 'MOVING' and selected_box_idx >= 0:
+            cur_box = boxes[selected_box_idx]
+            dx = x - drag_start_pos[0]
+            dy = y_adj - drag_start_pos[1]
+            cur_box.cx = drag_start_box.cx + dx
+            cur_box.cy = drag_start_box.cy + dy
+
+        elif interaction_mode == 'ROTATING' and selected_box_idx >= 0:
+            cur_box = boxes[selected_box_idx]
+            angle_rad = math.atan2(y_adj - cur_box.cy, x - cur_box.cx)
+            cur_box.angle_deg = (math.degrees(angle_rad) + 90.0) % 360.0
+
+        elif interaction_mode == 'RESIZING_HANDLE' and selected_box_idx >= 0:
+            cur_box = boxes[selected_box_idx]
+            orig_box = drag_start_box
+            lx, ly = orig_box.to_local(x, y_adj)
+
+            if active_handle_idx in [0, 1, 2, 3]:
+                # Corner resize
+                cur_box.w = max(10.0, abs(lx) * 2.0)
+                cur_box.h = max(10.0, abs(ly) * 2.0)
+            elif active_handle_idx in [4, 6]:
+                # Top / Bottom edge: adjust height only
+                cur_box.h = max(10.0, abs(ly) * 2.0)
+            elif active_handle_idx in [5, 7]:
+                # Left / Right edge: adjust width only
+                cur_box.w = max(10.0, abs(lx) * 2.0)
+
+    # 5. LEFT BUTTON UP
+    elif event == cv2.EVENT_LBUTTONUP:
+        if interaction_mode == 'DRAWING_NEW':
+            x1, y1 = drag_start_pos
+            x2, y2 = x, y_adj
+            min_x, max_x = min(x1, x2), max(x1, x2)
+            min_y, max_y = min(y1, y2), max(y1, y2)
+            bw = max_x - min_x
+            bh = max_y - min_y
+            if bw >= 10 and bh >= 10:
+                push_history()
+                new_box = OBBBox(cls_id=0, cx=(min_x + max_x)/2.0, cy=(min_y + max_y)/2.0, w=bw, h=bh, angle_deg=0.0)
+                boxes.append(new_box)
+                selected_box_idx = len(boxes) - 1
+                print(f"✨ 建立新標籤框 (預設 0:Plastic)，按 0~3 切換類別，拖曳頂部黃點可旋轉")
+
+        interaction_mode = 'IDLE'
+        drag_start_box = None
+        active_handle_idx = -1
+
+def render_ui(display_img, img_w, img_h, img_idx, total_imgs, filename, dataset_name):
+    # 1. Draw All Bounding Boxes
+    for i, b in enumerate(boxes):
+        corners = b.get_corners()
+        pts_np = np.array(corners, dtype=np.int32).reshape((-1, 1, 2))
+        
+        is_selected = (i == selected_box_idx)
+        color = COLORS[b.cls_id]
+        
+        # Draw Box Polygon
+        cv2.polylines(display_img, [pts_np], isClosed=True, color=color, thickness=2, lineType=cv2.LINE_AA)
+        
+        # Semi-transparent overlay
+        overlay = display_img.copy()
+        cv2.fillPoly(overlay, [pts_np], color=color)
+        alpha = 0.15 if not is_selected else 0.28
+        cv2.addWeighted(overlay, alpha, display_img, 1 - alpha, 0, display_img)
+
+        # Center Point
+        cx_i, cy_i = int(round(b.cx)), int(round(b.cy))
+        cv2.circle(display_img, (cx_i, cy_i), 3, color, -1, cv2.LINE_AA)
+
+        # Forward Direction Pointer (Top edge midpoint)
+        _, tm = b.get_rotation_handle(offset=0)
+        cv2.line(display_img, (cx_i, cy_i), (int(round(tm[0])), int(round(tm[1]))), (255, 255, 255), 1, cv2.LINE_AA)
+
+        # Class and Angle Label
+        label_text = f"{CLASS_NAMES[b.cls_id]} ({int(b.angle_deg)}°)"
+        txt_pos_x = int(round(corners[0][0]))
+        txt_pos_y = max(20, int(round(corners[0][1])) - 6)
+        cv2.putText(display_img, label_text, (txt_pos_x, txt_pos_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2, cv2.LINE_AA)
+
+        # Draw Handles for Selected Box
+        if is_selected:
+            # Highlight border
+            cv2.polylines(display_img, [pts_np], isClosed=True, color=(255, 255, 255), thickness=2, lineType=cv2.LINE_AA)
+
+            # Rotation Handle (Yellow circle connected with line)
+            rot_handle, top_mid = b.get_rotation_handle(offset=25)
+            cv2.line(display_img, (int(round(top_mid[0])), int(round(top_mid[1]))),
+                     (int(round(rot_handle[0])), int(round(rot_handle[1]))), (0, 255, 255), 2, cv2.LINE_AA)
+            cv2.circle(display_img, (int(round(rot_handle[0])), int(round(rot_handle[1]))), 7, (0, 255, 255), -1, cv2.LINE_AA)
+            cv2.circle(display_img, (int(round(rot_handle[0])), int(round(rot_handle[1]))), 8, (0, 0, 0), 1, cv2.LINE_AA)
+
+            # Corner Handles (Squares)
+            for cp in corners:
+                cpx, cpy = int(round(cp[0])), int(round(cp[1]))
+                cv2.rectangle(display_img, (cpx-4, cpy-4), (cpx+4, cpy+4), (255, 255, 255), -1)
+                cv2.rectangle(display_img, (cpx-4, cpy-4), (cpx+4, cpy+4), (0, 0, 0), 1)
+
+            # Edge Midpoint Handles (Circles)
+            edge_mids = b.get_edge_midpoints()
+            for ep in edge_mids:
+                epx, epy = int(round(ep[0])), int(round(ep[1]))
+                cv2.circle(display_img, (epx, epy), 4, (255, 255, 255), -1, cv2.LINE_AA)
+                cv2.circle(display_img, (epx, epy), 4, (0, 0, 0), 1, cv2.LINE_AA)
+
+    # 2. Top Banner & HUD Information
+    header_h = 42
+    banner = np.zeros((header_h, img_w, 3), dtype=np.uint8)
+    banner[:] = (35, 35, 35)
+
+    # Dataset & Progress Info
+    ds_badge = f"[{dataset_name.upper()}] [{img_idx+1}/{total_imgs}] {filename}"
+    cv2.putText(banner, ds_badge, (12, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
+
+    # Selected Box Info / Quick Help
+    if selected_box_idx >= 0 and selected_box_idx < len(boxes):
+        sel_b = boxes[selected_box_idx]
+        sel_info = f"Selected: {CLASS_NAMES[sel_b.cls_id]} | Angle: {int(sel_b.angle_deg)}° | [0-3]:Change [R/Wheel]:Rotate [Del]:Remove"
+        cv2.putText(banner, sel_info, (max(10, img_w - 700), 26), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (0, 255, 255), 1, cv2.LINE_AA)
+    else:
+        hint_text = "Drag:Draw New | Click:Select | A:Prev D:Next T:Switch-Dataset Q:Quit"
+        cv2.putText(banner, hint_text, (max(10, img_w - 630), 26), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (200, 200, 200), 1, cv2.LINE_AA)
+
+    # Combine Banner and Image
+    final_canvas = np.vstack([banner, display_img])
+    return final_canvas
+
+def main():
+    global current_dataset_idx, boxes, selected_box_idx, history_stack
+
+    window_name = "YOLO OBB Smart Annotation & Review Tool"
+    cv2.namedWindow(window_name, cv2.WINDOW_AUTOSIZE)
+    cv2.setMouseCallback(window_name, on_mouse)
+
+    print("\n" + "="*55)
+    print(" 🚀 YOLO OBB (Oriented Bounding Box) 旋轉標註工具已啟動")
+    print("="*55)
+    print("🎮 操作說明：")
+    print("  • 左鍵點擊框     : 選取該框（顯示旋轉與縮放把手）")
+    print("  • 拖曳黃色把手   : 自由旋轉角度")
+    print("  • 滑鼠滾輪 / R / E: 旋轉角度微調（滾輪超方便！）")
+    print("  • 拖曳角落/邊緣  : 等比 / 長寬拉伸（保持 90 度矩形）")
+    print("  • 拖曳框中心     : 移動框位置")
+    print("  • 空白處拖曳     : 畫出新框")
+    print("  • 數字鍵 0~3     : 快速切換選取框的類別 (0:塑膠, 1:金屬, 2:紙類, 3:一般)")
+    print("  • Delete / X / 右鍵: 刪除選取框")
+    print("  • Z 鍵           : 復原 (Undo)")
+    print("  • A / D / Space  : 上一張 / 下一張（自動存檔）")
+    print("  • T 鍵           : 切換 train / test 資料集")
+    print("  • Q / Esc        : 儲存並離開")
+    print("="*55)
 
     img_idx = 0
-    while img_idx < len(image_paths):
+    extensions = ["*.jpg", "*.jpeg", "*.png", "*.webp"]
+
+    while True:
+        dataset_name = DATASETS[current_dataset_idx]
+        images_dir = os.path.join(DATASET_ROOT, dataset_name, "images")
+        labels_dir = os.path.join(DATASET_ROOT, dataset_name, "labels")
+
+        os.makedirs(images_dir, exist_ok=True)
+        os.makedirs(labels_dir, exist_ok=True)
+
+        image_paths = []
+        for ext in extensions:
+            image_paths.extend(glob.glob(os.path.join(images_dir, ext)))
+            image_paths.extend(glob.glob(os.path.join(images_dir, ext.upper())))
+        image_paths = sorted(image_paths)
+
+        if not image_paths:
+            print(f"⚠️ {dataset_name} 資料夾中沒有找到圖片。按 T 可切換資料夾。")
+            blank = np.zeros((400, 700, 3), dtype=np.uint8)
+            cv2.putText(blank, f"No images found in {images_dir}", (50, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            cv2.putText(blank, "Press T to switch dataset, or Q to quit", (50, 230), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+            cv2.imshow(window_name, blank)
+            key = cv2.waitKey(0) & 0xFF
+            if key == ord('t'):
+                current_dataset_idx = (current_dataset_idx + 1) % len(DATASETS)
+                img_idx = 0
+                continue
+            else:
+                break
+
+        img_idx = max(0, min(img_idx, len(image_paths) - 1))
         img_path = image_paths[img_idx]
         filename = os.path.basename(img_path)
-        name, ext = os.path.splitext(filename)
-        txt_path = os.path.join(LABELS_DIR, name + ".txt")
+        name, _ = os.path.splitext(filename)
+        txt_path = os.path.join(labels_dir, name + ".txt")
 
         raw_img = cv2.imread(img_path)
         if raw_img is None:
             img_idx += 1
             continue
-            
+
         h_raw, w_raw = raw_img.shape[:2]
-        max_dim = 960
+        max_dim = 1000
         scale = 1.0
         if max(h_raw, w_raw) > max_dim:
-            scale = max_dim / max(h_raw, w_raw)
-            raw_img = cv2.resize(raw_img, (int(w_raw*scale), int(h_raw*scale)))
-        
+            scale = max_dim / float(max(h_raw, w_raw))
+            raw_img = cv2.resize(raw_img, (int(w_raw * scale), int(h_raw * scale)))
+
         h, w = raw_img.shape[:2]
-        clone = raw_img.copy()
         
-        boxes = load_yolo_labels(txt_path, w, h)
-        temp_box = None
-        redraw_boxes()
-        
-        print(f"\n[{img_idx+1}/{len(image_paths)}] 審查中: {filename}")
+        # Load Labels (Supports both HBB and OBB)
+        boxes = load_labels(txt_path, w, h)
+        selected_box_idx = -1
+        history_stack.clear()
 
         while True:
-            display_img = img.copy()
-            # 在畫面左上角印出進度與提示
-            cv2.putText(display_img, f"[{img_idx+1}/{len(image_paths)}] A:Prev  D:Next  Click Box to Delete", 
-                        (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255), 2)
-            cv2.imshow("Label & Review Tool", display_img)
-            
-            key = cv2.waitKey(20) & 0xFF
+            display_img = raw_img.copy()
+            canvas = render_ui(display_img, w, h, img_idx, len(image_paths), filename, dataset_name)
+            cv2.imshow(window_name, canvas)
 
-            if key in CLASSES and temp_box is not None:
-                cls_id = CLASSES[key][0]
-                boxes.append((cls_id, *temp_box))
-                temp_box = None
-                redraw_boxes()
-                
-            elif key == ord('a'): # 上一張
-                save_yolo_labels(txt_path, w, h)
-                img_idx = max(0, img_idx - 1)
-                break
+            raw_key = cv2.waitKey(25)
+            if raw_key != -1:
+                key = raw_key & 0xFF
 
-            elif key == ord('d') or key == 13 or key == 32: # 下一張 (d, Enter, Space)
-                save_yolo_labels(txt_path, w, h)
-                img_idx += 1
-                break
+                # Key Actions
+                if key in CLASSES:
+                    if selected_box_idx >= 0 and selected_box_idx < len(boxes):
+                        push_history()
+                        boxes[selected_box_idx].cls_id = CLASSES[key][0]
+                        print(f"🏷️ 標籤已修改為: {CLASSES[key][1]}")
 
-            elif key == ord('q'): # 退出
-                save_yolo_labels(txt_path, w, h)
-                print("退出審查工具。")
-                cv2.destroyAllWindows()
-                return
+                elif key in [ord('r'), ord('['), ord('R'), ord(']'), ord('e'), ord('E')]:
+                    if selected_box_idx >= 0 and selected_box_idx < len(boxes):
+                        push_history()
+                        delta = 3.0 if key in [ord('e'), ord('E'), ord(']'), ord('R')] else -3.0
+                        boxes[selected_box_idx].angle_deg = (boxes[selected_box_idx].angle_deg + delta) % 360.0
 
-    print("\n審查完畢！如果發現剛才有修正錯誤的標籤，記得再跑一次 finetune.py 重新訓練！")
+                elif key in [ord('+'), ord('=')]:
+                    if selected_box_idx >= 0 and selected_box_idx < len(boxes):
+                        push_history()
+                        boxes[selected_box_idx].w *= 1.05
+                        boxes[selected_box_idx].h *= 1.05
+
+                elif key in [ord('-'), ord('_')]:
+                    if selected_box_idx >= 0 and selected_box_idx < len(boxes):
+                        push_history()
+                        boxes[selected_box_idx].w = max(5.0, boxes[selected_box_idx].w * 0.95)
+                        boxes[selected_box_idx].h = max(5.0, boxes[selected_box_idx].h * 0.95)
+
+                elif key in [ord('x'), ord('X'), 8, 127] or raw_key in [65535, 0xFFFF]: # 'x', Backspace, Delete
+                    if selected_box_idx >= 0 and selected_box_idx < len(boxes):
+                        push_history()
+                        print(f"🗑️ 刪除標籤框: {CLASS_NAMES[boxes[selected_box_idx].cls_id]}")
+                        boxes.pop(selected_box_idx)
+                        selected_box_idx = -1
+
+                elif key in [ord('z'), ord('Z'), ord('u')]: # Undo
+                    undo()
+
+                elif key in [ord('t'), ord('T')]: # Switch Dataset between train and test
+                    save_labels(txt_path, w, h)
+                    current_dataset_idx = (current_dataset_idx + 1) % len(DATASETS)
+                    img_idx = 0
+                    print(f"📂 切換資料夾至: {DATASETS[current_dataset_idx]}")
+                    break
+
+                elif key in [ord('a'), ord('A'), 81]: # 'a' or Left Arrow -> Prev Image
+                    save_labels(txt_path, w, h)
+                    img_idx = max(0, img_idx - 1)
+                    break
+
+                elif key in [ord('d'), ord('D'), 13, 32, 83]: # 'd', Enter, Space, Right Arrow -> Next
+                    save_labels(txt_path, w, h)
+                    img_idx += 1
+                    if img_idx >= len(image_paths):
+                        print("🎉 當前資料夾所有圖片已審查完畢！")
+                        img_idx = len(image_paths) - 1
+                    break
+
+                elif key in [ord('q'), ord('Q'), 27]: # 'q' or Esc -> Quit
+                    save_labels(txt_path, w, h)
+                    print("💾 所有標籤已儲存，退出標註工具。")
+                    cv2.destroyAllWindows()
+                    return
+
     cv2.destroyAllWindows()
 
 if __name__ == '__main__':
