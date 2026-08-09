@@ -3,6 +3,7 @@ import random
 import glob
 import math
 import tkinter as tk
+from tkinter import filedialog
 import numpy as np
 import cv2
 from PIL import Image, ImageTk
@@ -67,7 +68,7 @@ class App(ctk.CTk):
         # --- Sidebar Frame ---
         self.sidebar_frame = ctk.CTkFrame(self, width=280, corner_radius=0)
         self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
-        self.sidebar_frame.grid_rowconfigure(10, weight=1)
+        self.sidebar_frame.grid_rowconfigure(11, weight=1)
 
         self.logo_label = ctk.CTkLabel(
             self.sidebar_frame, 
@@ -141,14 +142,25 @@ class App(ctk.CTk):
             self.sidebar_frame, 
             text="載入隨機測試圖片", 
             command=self.load_random_image,
-            height=40,
+            height=36,
             font=ctk.CTkFont(size=14, weight="bold")
         )
-        self.load_btn.grid(row=8, column=0, padx=20, pady=10)
+        self.load_btn.grid(row=8, column=0, padx=20, pady=(5, 5))
+
+        self.select_btn = ctk.CTkButton(
+            self.sidebar_frame, 
+            text="手動選擇圖片檔案", 
+            command=self.select_image_file,
+            height=36,
+            fg_color="#3a7ebf",
+            hover_color="#326ba3",
+            font=ctk.CTkFont(size=14, weight="bold")
+        )
+        self.select_btn.grid(row=9, column=0, padx=20, pady=(5, 10))
 
         # Legend Box
         self.legend_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
-        self.legend_frame.grid(row=9, column=0, padx=20, pady=10, sticky="w")
+        self.legend_frame.grid(row=10, column=0, padx=20, pady=10, sticky="w")
         
         legend_items = [
             ("Plastic", "#2ecc71"),
@@ -215,6 +227,36 @@ class App(ctk.CTk):
         if self.current_image_path and self.raw_image_bgr is not None:
             self.run_inference()
 
+    def load_image_from_path(self, file_path):
+        if not file_path or not os.path.exists(file_path):
+            return
+            
+        self.current_image_path = file_path
+        filename = os.path.basename(self.current_image_path)
+        
+        if len(filename) > 22:
+            display_name = filename[:19] + "..."
+        else:
+            display_name = filename
+            
+        self.model_status_label.configure(text=f"Image: {display_name}", text_color="gray70")
+        
+        # Read image supporting UTF-8 / non-ASCII paths
+        try:
+            img_array = np.fromfile(self.current_image_path, dtype=np.uint8)
+            self.raw_image_bgr = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+        except Exception:
+            self.raw_image_bgr = None
+
+        if self.raw_image_bgr is None:
+            self.raw_image_bgr = cv2.imread(self.current_image_path)
+
+        if self.raw_image_bgr is None:
+            self.model_status_label.configure(text="Decode Error", text_color="#dc3545")
+            return
+            
+        self.run_inference()
+
     def load_random_image(self):
         extensions = ["*.jpg", "*.jpeg", "*.png", "*.webp"]
         images = []
@@ -226,22 +268,22 @@ class App(ctk.CTk):
             self.model_status_label.configure(text="No images in test/images", text_color="#dc3545")
             return
             
-        self.current_image_path = random.choice(images)
-        filename = os.path.basename(self.current_image_path)
-        
-        if len(filename) > 22:
-            display_name = filename[:19] + "..."
-        else:
-            display_name = filename
-            
-        self.model_status_label.configure(text=f"Image: {display_name}", text_color="gray70")
-        
-        self.raw_image_bgr = cv2.imread(self.current_image_path)
-        if self.raw_image_bgr is None:
-            self.model_status_label.configure(text="Decode Error", text_color="#dc3545")
-            return
-            
-        self.run_inference()
+        selected = random.choice(images)
+        self.load_image_from_path(selected)
+
+    def select_image_file(self):
+        initial_dir = os.path.abspath(TEST_IMAGES_DIR) if os.path.exists(TEST_IMAGES_DIR) else os.getcwd()
+        filetypes = [
+            ("Image Files", "*.jpg *.jpeg *.png *.webp *.bmp *.JPG *.JPEG *.PNG *.WEBP *.BMP"),
+            ("All Files", "*.*")
+        ]
+        file_path = filedialog.askopenfilename(
+            title="選擇要推論的圖片檔案",
+            initialdir=initial_dir,
+            filetypes=filetypes
+        )
+        if file_path:
+            self.load_image_from_path(file_path)
 
     def run_inference(self):
         if not hasattr(self, 'model') or self.raw_image_bgr is None:
