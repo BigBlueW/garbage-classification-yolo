@@ -9,6 +9,14 @@ import cv2
 from PIL import Image, ImageTk
 import customtkinter as ctk
 from ultralytics import YOLO
+import argparse
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Garbage Classification Inference Engine")
+    parser.add_argument("--path", type=str, default="custom_dataset/test/images", help="Path to the test images directory")
+    return parser.parse_args()
+
+args = parse_args()
 
 # Setup CustomTkinter Theme
 ctk.set_appearance_mode("Dark")
@@ -16,7 +24,7 @@ ctk.set_default_color_theme("dark-blue")
 
 # Config Paths
 MODEL_PATH = "best.pt"
-TEST_IMAGES_DIR = "custom_dataset/test/images"
+TEST_IMAGES_DIR = args.path if os.path.exists(args.path) else "custom_dataset/test/images"
 
 # BGR Colors for OpenCV rendering
 CLASS_COLORS = {
