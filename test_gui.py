@@ -67,7 +67,7 @@ class App(ctk.CTk):
         super().__init__()
         
         self.title("Garbage Classification Inference Engine (YOLOv11-OBB)")
-        self.geometry("1180x780")
+        self.geometry("1420x780")
         
         # Configure Grid Layout
         self.grid_columnconfigure(1, weight=1)
@@ -363,9 +363,20 @@ class App(ctk.CTk):
             # cv2.rectangle(annotated, (badge_x1, badge_y1), (badge_x2, badge_y2), color, -1)
             # cv2.rectangle(annotated, (badge_x1, badge_y1), (badge_x2, badge_y2), (0, 0, 0), 1)
             
-            # White bold text inside badge
+            # 繪製醒目白色描邊（8 方向擴展純白外框，確保在任何背景皆有清晰白邊）
+            text_x = max(4, badge_x1)
             text_y = badge_y2 - pad_y
-            cv2.putText(annotated, badge_text, (badge_x1, text_y),
+            outline_radius = max(2, int(round(font_scale * 2.5)))
+            
+            # 先以多重偏移繪製純白實心描邊
+            for dx in range(-outline_radius, outline_radius + 1):
+                for dy in range(-outline_radius, outline_radius + 1):
+                    if dx != 0 or dy != 0:
+                        cv2.putText(annotated, badge_text, (text_x + dx, text_y + dy),
+                                    cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), font_thick + 1, cv2.LINE_AA)
+            
+            # 再於中心繪製類別專屬顏色文字
+            cv2.putText(annotated, badge_text, (text_x, text_y),
                         cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, font_thick, cv2.LINE_AA)
 
             # Optional Grasp Pose Overlay
@@ -384,7 +395,32 @@ class App(ctk.CTk):
                 cv2.line(annotated, p3, p4, (0, 255, 255), max(2, line_thick), cv2.LINE_AA)
                 cv2.circle(annotated, (int(cx), int(cy)), max(4, line_thick + 2), (0, 0, 255), -1, cv2.LINE_AA)
 
-        self.show_image(annotated)
+        # 5. Side-by-Side View: Left (Original) | Right (Annotated)
+        raw_display = self.raw_image_bgr.copy()
+        
+        # Tags with dark outline for clear visibility
+        tag_scale = max(0.7, min(1.2, img_w / 1000.0))
+        tag_thick = max(2, int(round(tag_scale * 2.0)))
+        
+        # Left Tag: Original
+        orig_text = "Original"
+        orig_pos = (18, int(35 * tag_scale + 5))
+        cv2.putText(raw_display, orig_text, orig_pos, cv2.FONT_HERSHEY_SIMPLEX, tag_scale, (0, 0, 0), tag_thick + 3, cv2.LINE_AA)
+        cv2.putText(raw_display, orig_text, orig_pos, cv2.FONT_HERSHEY_SIMPLEX, tag_scale, (255, 255, 255), tag_thick, cv2.LINE_AA)
+        
+        # Right Tag: OBB Detection
+        det_text = f"OBB Detection ({len(boxes_list)} objects)"
+        det_pos = (18, int(35 * tag_scale + 5))
+        cv2.putText(annotated, det_text, det_pos, cv2.FONT_HERSHEY_SIMPLEX, tag_scale, (0, 0, 0), tag_thick + 3, cv2.LINE_AA)
+        cv2.putText(annotated, det_text, det_pos, cv2.FONT_HERSHEY_SIMPLEX, tag_scale, (0, 255, 255), tag_thick, cv2.LINE_AA)
+
+        # Divider between left and right
+        divider_w = max(3, int(img_w / 300.0))
+        divider = np.zeros((img_h, divider_w, 3), dtype=np.uint8)
+        divider[:] = (45, 45, 45)
+
+        combined = np.hstack([raw_display, divider, annotated])
+        self.show_image(combined)
 
     def on_canvas_resize(self, event):
         if self.current_tk_image is not None and hasattr(self, 'last_annotated_img_rgb'):
