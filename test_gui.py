@@ -96,7 +96,7 @@ class App(ctk.CTk):
         # Confidence Slider
         self.conf_label = ctk.CTkLabel(
             self.sidebar_frame, 
-            text="Confidence: 0.25", 
+            text="Confidence: 0.60", 
             anchor="w"
         )
         self.conf_label.grid(row=2, column=0, padx=20, pady=(5, 0), sticky="w")
@@ -108,7 +108,7 @@ class App(ctk.CTk):
             number_of_steps=90, 
             command=self.update_sliders
         )
-        self.conf_slider.set(0.25)
+        self.conf_slider.set(0.60)
         self.conf_slider.grid(row=3, column=0, padx=20, pady=(5, 10))
 
         # NMS IoU Slider
@@ -132,23 +132,24 @@ class App(ctk.CTk):
         # Agnostic NMS Switch (跨類別抑制)
         self.agnostic_switch = ctk.CTkSwitch(
             self.sidebar_frame,
-            text="跨類別 NMS 消除重複",
+            text="Agnostic NMS",
             command=self.run_inference
         )
         self.agnostic_switch.select()
         self.agnostic_switch.grid(row=6, column=0, padx=20, pady=(5, 10), sticky="w")
 
-        # Grasp Pose Switch (預設關閉，保持畫面乾淨)
+        # Grasp Pose Switch (預設開啟)
         self.grasp_switch = ctk.CTkSwitch(
             self.sidebar_frame,
-            text="顯示夾爪姿態輔助線",
+            text="Grasp Pose",
             command=self.run_inference
         )
+        self.grasp_switch.select()
         self.grasp_switch.grid(row=7, column=0, padx=20, pady=(5, 15), sticky="w")
 
         self.load_btn = ctk.CTkButton(
             self.sidebar_frame, 
-            text="載入隨機測試圖片", 
+            text="Load Random Image", 
             command=self.load_random_image,
             height=36,
             font=ctk.CTkFont(size=14, weight="bold")
@@ -157,7 +158,7 @@ class App(ctk.CTk):
 
         self.select_btn = ctk.CTkButton(
             self.sidebar_frame, 
-            text="手動選擇圖片檔案", 
+            text="Select Image File", 
             command=self.select_image_file,
             height=36,
             fg_color="#3a7ebf",
@@ -359,13 +360,13 @@ class App(ctk.CTk):
             badge_x2 = min(annotated.shape[1], badge_x1 + tw)
             
             # Draw solid badge background with slightly darker inner border
-            cv2.rectangle(annotated, (badge_x1, badge_y1), (badge_x2, badge_y2), color, -1)
-            cv2.rectangle(annotated, (badge_x1, badge_y1), (badge_x2, badge_y2), (0, 0, 0), 1)
+            # cv2.rectangle(annotated, (badge_x1, badge_y1), (badge_x2, badge_y2), color, -1)
+            # cv2.rectangle(annotated, (badge_x1, badge_y1), (badge_x2, badge_y2), (0, 0, 0), 1)
             
             # White bold text inside badge
             text_y = badge_y2 - pad_y
             cv2.putText(annotated, badge_text, (badge_x1, text_y),
-                        cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), font_thick, cv2.LINE_AA)
+                        cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, font_thick, cv2.LINE_AA)
 
             # Optional Grasp Pose Overlay
             if show_grasp:
@@ -376,6 +377,11 @@ class App(ctk.CTk):
                 p1 = (int(cx - dx), int(cy - dy))
                 p2 = (int(cx + dx), int(cy + dy))
                 cv2.line(annotated, p1, p2, (255, 255, 0), max(2, line_thick), cv2.LINE_AA)
+                dx2 = (grasp_len / 3.0) * math.cos(rad)
+                dy2 = (grasp_len / 3.0) * math.sin(rad)
+                p3 = (int(cx - dx2), int(cy - dy2))
+                p4 = (int(cx + dx2), int(cy + dy2))
+                cv2.line(annotated, p3, p4, (0, 255, 255), max(2, line_thick), cv2.LINE_AA)
                 cv2.circle(annotated, (int(cx), int(cy)), max(4, line_thick + 2), (0, 0, 255), -1, cv2.LINE_AA)
 
         self.show_image(annotated)

@@ -8,7 +8,7 @@ from PIL import Image
 from ultralytics import YOLO
 
 MODEL_PATH = "best.pt"
-TEST_IMAGES_DIR = "custom_dataset/test/images"
+TEST_IMAGES_DIR = "custom_dataset/demo"
 OUTPUT_GIF_PATH = "demo.gif"
 
 CLASS_COLORS = {
@@ -68,11 +68,12 @@ def main():
         h, w = img_bgr.shape[:2]
         
         # 1. 執行推論
-        results = model(img_bgr, conf=0.30, iou=0.45, verbose=False)[0]
+        results = model(img_bgr, conf=0.5, iou=0.45, verbose=False)[0]
         
         boxes_list = []
         if hasattr(results, 'obb') and results.obb is not None and len(results.obb) > 0:
             xyxyxyxy = results.obb.xyxyxyxy.cpu().numpy()
+            xywhr = results.obb.xywhr.cpu().numpy()
             confs = results.obb.conf.cpu().numpy()
             clss = results.obb.cls.cpu().numpy().astype(int)
             
@@ -81,7 +82,8 @@ def main():
                     'cls': clss[i],
                     'name': model.names[clss[i]],
                     'conf': float(confs[i]),
-                    'pts': xyxyxyxy[i]
+                    'pts': xyxyxyxy[i],
+                    'xywhr': xywhr[i]
                 })
                 
         # 2. 跨類別 NMS
@@ -114,16 +116,31 @@ def main():
             badge_x1 = max(0, bx)
             badge_x2 = min(w, badge_x1 + tw)
             
-            cv2.rectangle(annotated, (badge_x1, badge_y1), (badge_x2, badge_y2), color, -1)
-            cv2.rectangle(annotated, (badge_x1, badge_y1), (badge_x2, badge_y2), (0, 0, 0), 1)
+            # cv2.rectangle(annotated, (badge_x1, badge_y1), (badge_x2, badge_y2), color, -1)
+            # cv2.rectangle(annotated, (badge_x1, badge_y1), (badge_x2, badge_y2), (0, 0, 0), 1)
             
             cv2.putText(annotated, badge_text, (badge_x1, badge_y2 - pad_y),
-                        cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), font_thick, cv2.LINE_AA)
+                        cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, font_thick, cv2.LINE_AA)
+
+            # 抓取姿態標註 (Grasp Pose Overlay)
+            cx, cy, bw, bh, rad = b['xywhr']
+            grasp_len = max(bw, bh) * 0.5
+            dx = (grasp_len / 2.0) * math.cos(rad + math.pi / 2.0)
+            dy = (grasp_len / 2.0) * math.sin(rad + math.pi / 2.0)
+            p1 = (int(cx - dx), int(cy - dy))
+            p2 = (int(cx + dx), int(cy + dy))
+            cv2.line(annotated, p1, p2, (255, 255, 0), max(2, line_thick), cv2.LINE_AA)
+            dx2 = (grasp_len / 3.0) * math.cos(rad)
+            dy2 = (grasp_len / 3.0) * math.sin(rad)
+            p3 = (int(cx - dx2), int(cy - dy2))
+            p4 = (int(cx + dx2), int(cy + dy2))
+            cv2.line(annotated, p3, p4, (0, 255, 255), max(2, line_thick), cv2.LINE_AA)
+            cv2.circle(annotated, (int(cx), int(cy)), max(4, line_thick + 2), (0, 0, 255), -1, cv2.LINE_AA)
 
         # 5. 統一輸出固定 9:16 尺寸 (寬 540 x 高 960)，
         #    先讓標註影像左右貼齊邊界、上下以黑邊補滿並垂直置中，
         #    最後再把 HUD 資訊條疊在畫布底部（確保每幀都顯示檔名）
-        canvas_w, canvas_h = 540, 960
+        canvas_w, canvas_h = 960, 540
         hud_h = 36
         canvas = np.zeros((canvas_h, canvas_w, 3), dtype=np.uint8)
 
