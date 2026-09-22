@@ -1,4 +1,5 @@
 # Environments
+.venv
 .venv/
 __pycache__/
 *.pyc
@@ -11,6 +12,10 @@ __pycache__/
 archive/
 archive.zip
 *.cache
+custom_dataset/train/
+custom_dataset/val/
+custom_dataset/test/
+custom_dataset/.split_tmp/
 
 # Model Weights
 yolo*.pt
@@ -19,3 +24,5 @@ last.pt
 # Training outputs and test results
 runs/
 test_results/
+garbage_classification_runs/
+
