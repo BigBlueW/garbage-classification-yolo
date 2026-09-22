@@ -1,5 +1,14 @@
 # AI Robotics - Garbage Classification & Grasping (YOLOv11-OBB)
 
+> [!NOTE]
+> ### ⚠️ 本專案已封存 (ARCHIVED)
+> 本儲存庫已封存不再維護。專案已重構遷移至新倉庫：
+> 👉 **[garbage-yolo (GitHub)](https://github.com/BigBlueW/garbage-yolo)**
+>
+> - **資料集託管於 Hugging Face**：🤗 [**`0326BlueW/robotic-garbage-obb`**](https://huggingface.co/datasets/0326BlueW/robotic-garbage-obb)
+> - **最新獨立測試集指標**：mAP@50: 0.9562、mAP@50-95: 0.8514
+> - 代碼與資料集已解耦，改以 Git Submodule 進行引用。
+
 ![Demo](demo.gif)
 
 這是一個專為**機器手臂夾爪 (Parallel Gripper)** 設計的 **YOLOv11-OBB (Oriented Bounding Box，旋轉邊界框)** 垃圾辨識與抓取姿態預測系統。
